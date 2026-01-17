@@ -2,14 +2,12 @@
 import os
 import subprocess
 import urllib.request
-import time
 
 SERVER_DIR = "/opt/minecraft"
-RAM = "16G"
+RAM = "4G"  # Adjust if needed
 
 PAPER_URL = "https://fill-data.papermc.io/v1/objects/b727f13945dd442cd2bc1de6c64680e8630e7f54ba259aac7687e9c7c3cc18a3/paper-1.21.11-97.jar"
 
-# Plugins dictionary: filename -> download URL
 PLUGINS = {
     "EssentialsX.jar": "https://github.com/EssentialsX/Essentials/releases/download/2.21.2/EssentialsX-2.21.2.jar",
     "DiscordSRV.jar": "https://github.com/DiscordSRV/DiscordSRV/releases/download/v1.30.4/DiscordSRV-Build-1.30.4.jar",
@@ -34,57 +32,65 @@ PLUGINS = {
 def run(cmd):
     subprocess.run(cmd, shell=True, check=True)
 
-def main():
-    # Install Java
-    run("apt update")
-    run("apt install -y openjdk-21-jdk wget")
+def download_file(url, dest):
+    """Download a file with proper User-Agent"""
+    print(f"Downloading {url}...")
+    req = urllib.request.Request(url, headers={"User-Agent": "minecraft-server-setup/1.0"})
+    with urllib.request.urlopen(req) as response, open(dest, "wb") as out_file:
+        out_file.write(response.read())
+    print(f"Saved to {dest}")
 
-    # Create directories
-    plugins_dir = f"{SERVER_DIR}/plugins"
+def main():
+    # Optional: Install Java if needed (requires sudo)
+    # run("apt update")
+    # run("apt install -y openjdk-21-jdk wget")
+
+    # Create server directories
+    plugins_dir = os.path.join(SERVER_DIR, "plugins")
     os.makedirs(plugins_dir, exist_ok=True)
 
     # Download Paper
-    print("Downloading Paper 1.21.11...")
-    urllib.request.urlretrieve(PAPER_URL, f"{SERVER_DIR}/paper.jar")
+    download_file(PAPER_URL, os.path.join(SERVER_DIR, "paper.jar"))
 
     # Accept EULA
-    with open(f"{SERVER_DIR}/eula.txt", "w") as f:
+    with open(os.path.join(SERVER_DIR, "eula.txt"), "w") as f:
         f.write("eula=true\n")
 
     # Download all plugins
-    print("Downloading plugins...")
     for name, url in PLUGINS.items():
-        print(f" - {name}")
-        urllib.request.urlretrieve(url, f"{plugins_dir}/{name}")
+        download_file(url, os.path.join(plugins_dir, name))
+
+    # Ensure correct permissions (fixes session.lock issues)
+    os.chmod(SERVER_DIR, 0o755)
+    for root, dirs, files in os.walk(SERVER_DIR):
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o755)
+        for f in files:
+            os.chmod(os.path.join(root, f), 0o644)
 
     # Start server
-    print("Starting Minecraft server...")
     os.chdir(SERVER_DIR)
     server = subprocess.Popen(
-        [
-            "java",
-            f"-Xms{RAM}",
-            f"-Xmx{RAM}",
-            "-jar",
-            "paper.jar",
-            "nogui"
-        ],
+        ["java", f"-Xms2G", f"-Xmx{RAM}", "-jar", "paper.jar", "nogui"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True
     )
 
-    # Wait for server startup
+    # Wait until server prints "Done"
     print("Waiting for server to fully start...")
-    time.sleep(30)
+    while True:
+        line = server.stdout.readline()
+        if not line:
+            break
+        print(line, end="")
+        if "Done (" in line:
+            server.stdin.write("op bankrollsnblunts\n")
+            server.stdin.flush()
+            print("Granted OP to bankrollsnblunts")
 
-    # OP the player
-    print("Granting OP to bankrollsnblunts...")
-    server.stdin.write("op bankrollsnblunts\n")
-    server.stdin.flush()
-
-    # Stream console output
+    # Stream remaining console output
     for line in server.stdout:
         print(line, end="")
 
